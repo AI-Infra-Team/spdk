@@ -29,6 +29,19 @@ disclaimer() {
 			[[ $VERSION_ID == 8* ]] || return 0
 			yum() { "$(type -P yum)" --setopt=skip_if_unavailable=True "$@"; }
 			;;
+		centos)
+			# CentOS 7/8 are EOL, continue best-effort with relaxed yum options.
+			if [[ $VERSION_ID == 7* || $VERSION_ID == 8* ]]; then
+				cat <<- WARN
+
+					WARNING: $PRETTY_NAME detected (EOL). Continuing in best-effort mode.
+					Some packages may be missing or come from EPEL/ELRepo. io_uring features
+					require a newer kernel at runtime; liburing will be built from source.
+
+				WARN
+				yum() { "$(type -P yum)" --setopt=skip_if_unavailable=True --skip-broken "$@"; }
+			fi
+			;;
 	esac
 }
 
@@ -36,21 +49,28 @@ is_repo() { yum repolist --all | grep -q "^$1"; }
 
 disclaimer
 
-if [[ $ID == centos && $VERSION_ID =~ ^[78].* ]]; then
-	printf 'Not supported distribution detected (%s):(%s), aborting\n' "$ID" "$VERSION_ID" >&2
-	exit 1
-fi
-
 # First, add extra EPEL, ELRepo, Ceph repos to have a chance of covering most of the packages
 # on the enterprise systems, like RHEL.
 if [[ $ID == centos || $ID == rhel || $ID == rocky ]]; then
 	repos=() enable=("epel" "elrepo" "elrepo-testing") add=()
+
+	if [[ $VERSION_ID == 7* ]]; then
+		repos+=("https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm")
+		repos+=("https://www.elrepo.org/elrepo-release-7.el7.elrepo.noarch.rpm")
+	fi
 
 	if [[ $VERSION_ID == 8* ]]; then
 		repos+=("https://dl.fedoraproject.org/pub/epel/epel-release-latest-8.noarch.rpm")
 		repos+=("https://www.elrepo.org/elrepo-release-8.el8.elrepo.noarch.rpm")
 		add+=("https://packages.daos.io/v2.0/EL8/packages/x86_64/daos_packages.repo")
 		enable+=("daos-packages")
+		# Enable extra repos commonly needed on CentOS 8
+		if [[ $ID == centos ]]; then
+			is_repo "PowerTools" && enable+=("PowerTools")
+			is_repo "powertools" && enable+=("powertools")
+			is_repo "extras" && enable+=("extras")
+			is_repo "extras-common" && enable+=("extras-common")
+		fi
 	fi
 
 	if [[ $VERSION_ID == 9* ]]; then
@@ -113,7 +133,7 @@ if [ "$(uname -m)" = "aarch64" ]; then
 	pip3 install scikit-build
 fi
 
-if echo "$ID $VERSION_ID" | grep -E -q 'rhel 8|rocky 8'; then
+if echo "$ID $VERSION_ID" | grep -E -q 'rhel 8|rocky 8|centos 8'; then
 	yum install -y python36 python36-devel
 	#Create hard link to use in SPDK as python
 	if [[ ! -e /usr/bin/python && -e /etc/alternatives/python3 ]]; then
@@ -125,6 +145,11 @@ if echo "$ID $VERSION_ID" | grep -E -q 'rhel 8|rocky 8'; then
 	# binary.
 	pip3 install --upgrade pip
 	pip3() { /usr/local/bin/pip "$@"; }
+elif echo "$ID $VERSION_ID" | grep -E -q 'centos 7'; then
+	# On CentOS 7, install Python 3 from EPEL and ensure common binary names exist
+	yum install -y python36 python36-devel python36-pip || true
+	command -v python3 >/dev/null 2>&1 || { [[ -x /usr/bin/python3.6 ]] && ln -sf /usr/bin/python3.6 /usr/bin/python3; } || true
+	command -v pip3 >/dev/null 2>&1 || { [[ -x /usr/bin/pip3.6 ]] && ln -sf /usr/bin/pip3.6 /usr/bin/pip3; } || true
 else
 	yum install -y python python3-devel
 fi
@@ -132,7 +157,11 @@ fi
 pip3 install -r "$rootdir/scripts/pkgdep/requirements.txt"
 
 # Additional dependencies for SPDK CLI
-yum install -y python3-configshell python3-pexpect
+if [[ $ID == centos && $VERSION_ID == 7* ]]; then
+	echo "Skipping SPDK CLI python3 dependencies on CentOS 7"
+else
+	yum install -y python3-configshell python3-pexpect
+fi
 # Additional dependencies for ISA-L used in compression
 yum install -y autoconf automake libtool help2man
 # Additional dependencies for DPDK
@@ -144,6 +173,8 @@ if [[ $INSTALL_DEV_TOOLS == "true" ]]; then
 	devtool_pkgs=(git sg3_utils pciutils libabigail bash-completion ruby-devel)
 
 	if echo "$ID $VERSION_ID" | grep -E -q 'rocky 8'; then
+		devtool_pkgs+=(python3-pycodestyle astyle)
+	elif echo "$ID $VERSION_ID" | grep -E -q 'centos 8'; then
 		devtool_pkgs+=(python3-pycodestyle astyle)
 	elif echo "$ID $VERSION_ID" | grep -E -q 'rocky 10'; then
 		echo "Rocky 10 do not have python3-pycodestyle and lcov dependencies"
