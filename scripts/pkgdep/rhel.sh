@@ -151,7 +151,7 @@ elif echo "$ID $VERSION_ID" | grep -E -q 'centos 7'; then
 	command -v python3 >/dev/null 2>&1 || { [[ -x /usr/bin/python3.6 ]] && ln -sf /usr/bin/python3.6 /usr/bin/python3; } || true
 	command -v pip3 >/dev/null 2>&1 || { [[ -x /usr/bin/pip3.6 ]] && ln -sf /usr/bin/pip3.6 /usr/bin/pip3; } || true
 else
-	yum install -y python python3-devel
+	yum install -y python3-devel
 fi
 
 # Since we are inside the Manylinux container, use the provided Python installations
