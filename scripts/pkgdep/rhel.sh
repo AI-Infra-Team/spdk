@@ -154,7 +154,8 @@ else
 	yum install -y python python3-devel
 fi
 
-pip3 install -r "$rootdir/scripts/pkgdep/requirements.txt"
+# Since we are inside the Manylinux container, use the provided Python installations
+/opt/python/cp310-cp310/bin/pip install -r "$rootdir/scripts/pkgdep/requirements.txt"
 
 # Additional dependencies for SPDK CLI
 if [[ $ID == centos && $VERSION_ID == 7* ]]; then
